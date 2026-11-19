@@ -49,6 +49,9 @@ fun attemptAutoSignIn(
   val clientId = try {
     context.getString(R.string.default_web_client_id)
   } catch (_: Exception) {
+    ""
+  }
+  if (clientId.isBlank()) {
     onUnauthenticated()
     return
   }
@@ -87,7 +90,10 @@ fun onGoogleSignInClicked(
   val clientId = try {
     context.getString(R.string.default_web_client_id)
   } catch (_: Exception) {
-    onAuthError("إعدادات تسجيل الدخول غير مكتملة: default_web_client_id مفقود")
+    ""
+  }
+  if (clientId.isBlank()) {
+    onAuthError("إعدادات تسجيل الدخول غير مكتملة: أضف google-services.json إلى المشروع")
     return
   }
   val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()

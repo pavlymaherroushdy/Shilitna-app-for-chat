@@ -20,6 +20,13 @@ android {
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    if (!file("google-services.json").exists()) {
+      resValue("string", "default_web_client_id", "")
+    }
+    if (!file("src/main/res/values/firebase_applet_config.xml").exists()) {
+      resValue("string", "firestore_database_id", "(default)")
+    }
   }
 
   // Do not remove or modify these signingConfigs. They are necessary for building, installing,
