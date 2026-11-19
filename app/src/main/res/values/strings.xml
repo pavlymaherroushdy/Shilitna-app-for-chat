@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">شلتنا</string>
+    <string name="sign_in_google">تسجيل الدخول عبر Google</string>
+    <string name="create_group_invite">إنشاء مجموعة / دعوة الشلة</string>
+    <string name="join_by_link">فتح رابط دعوة</string>
+    <string name="share_whatsapp">مشاركة عبر واتساب</string>
+    <string name="save_pin_enter">حفظت الرمز / دخول الشات</string>
+    <string name="room_management">إدارة الغرفة</string>
+    <string name="share_photo">مشاركة صورة من الجهاز</string>
+    <string name="share_video">مشاركة فيديو من الجهاز</string>
+    <string name="mini_games">الألعاب المصغرة</string>
+</resources>

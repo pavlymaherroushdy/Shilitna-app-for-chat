@@ -1,0 +1,6 @@
+{
+  "name": "شلتنا",
+  "description": "دردشة خاصة للأصدقاء باللغة العربية مع رمز سري ودعوات واتساب",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

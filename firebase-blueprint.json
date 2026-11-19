@@ -1,0 +1,153 @@
+{
+  "entities": {
+    "SquadRoom": {
+      "title": "SquadRoom",
+      "description": "A private friend group chat room protected by a Secret PIN.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Display name of the squad chat room (1-60 chars)."
+        },
+        "adminUid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the room creator/admin."
+        },
+        "adminName": {
+          "type": "string",
+          "description": "Display name of the room admin (1-60 chars)."
+        },
+        "pin": {
+          "type": "string",
+          "description": "Secret PIN required on subsequent visits (4-12 chars)."
+        },
+        "memberUids": {
+          "type": "array",
+          "description": "Bounded list of member UIDs (max 50) for local rule evaluation."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp (FieldValue.serverTimestamp()) when room was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp (FieldValue.serverTimestamp()) when room was last updated."
+        }
+      },
+      "required": ["name", "adminUid", "adminName", "pin", "memberUids", "createdAt", "updatedAt"]
+    },
+    "RoomMember": {
+      "title": "RoomMember",
+      "description": "Member presence and role within a squad room.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Member Firebase Auth UID matching document ID."
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Member display name."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "member"],
+          "description": "Role inside the room."
+        },
+        "online": {
+          "type": "boolean",
+          "description": "Current online presence indicator."
+        },
+        "adminUid": {
+          "type": "string",
+          "description": "Denormalized room admin UID."
+        },
+        "memberUids": {
+          "type": "array",
+          "description": "Denormalized bounded list of room member UIDs."
+        },
+        "lastSeen": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last online activity."
+        },
+        "joinedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when member joined."
+        }
+      },
+      "required": ["uid", "displayName", "role", "online", "adminUid", "memberUids", "lastSeen", "joinedAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Real-time message in a squad room supporting text, emojis, compressed photos, and video metadata.",
+      "type": "object",
+      "properties": {
+        "senderId": {
+          "type": "string",
+          "description": "UID of the message author."
+        },
+        "senderName": {
+          "type": "string",
+          "description": "Display name of the sender."
+        },
+        "text": {
+          "type": "string",
+          "description": "Message text content (including emojis)."
+        },
+        "mediaType": {
+          "type": "string",
+          "enum": ["text", "image", "video"],
+          "description": "Message media type."
+        },
+        "mediaBase64": {
+          "type": "string",
+          "description": "Optional compressed JPEG Base64 image or video thumbnail payload."
+        },
+        "mediaName": {
+          "type": "string",
+          "description": "Optional media filename."
+        },
+        "mediaDurationMs": {
+          "type": "integer",
+          "description": "Optional video duration in milliseconds."
+        },
+        "localMediaUri": {
+          "type": "string",
+          "description": "Optional local content URI for video playback on sender device."
+        },
+        "adminUid": {
+          "type": "string",
+          "description": "Denormalized room admin UID."
+        },
+        "memberUids": {
+          "type": "array",
+          "description": "Denormalized bounded list of room member UIDs."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when message was sent."
+        }
+      },
+      "required": ["senderId", "senderName", "text", "mediaType", "adminUid", "memberUids", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/rooms/{roomId}": {
+      "schema": { "$ref": "#/entities/SquadRoom" },
+      "description": "Private squad chat rooms with Secret PIN and bounded member list."
+    },
+    "/rooms/{roomId}/members/{memberId}": {
+      "schema": { "$ref": "#/entities/RoomMember" },
+      "description": "Real-time member presence and roles inside each squad room."
+    },
+    "/rooms/{roomId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Real-time chat messages and media items inside each squad room."
+    }
+  }
+}

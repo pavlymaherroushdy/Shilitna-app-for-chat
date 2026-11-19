@@ -1,0 +1,72 @@
+package com.example.ui.theme
+
+import androidx.compose.material3.Typography
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import com.example.R
+
+val CairoFontFamily = FontFamily(
+  Font(R.font.cairo, FontWeight.Normal),
+  Font(R.font.cairo, FontWeight.Medium),
+  Font(R.font.cairo, FontWeight.Bold)
+)
+
+val IbmArabicFontFamily = FontFamily(
+  Font(R.font.ibm_plex_sans_arabic, FontWeight.Normal),
+  Font(R.font.ibm_plex_sans_arabic, FontWeight.Medium),
+  Font(R.font.ibm_plex_sans_arabic, FontWeight.Bold)
+)
+
+val ShillaTypography = Typography(
+  displaySmall = TextStyle(
+    fontFamily = CairoFontFamily,
+    fontWeight = FontWeight.Bold,
+    fontSize = 30.sp,
+    lineHeight = 38.sp
+  ),
+  headlineMedium = TextStyle(
+    fontFamily = CairoFontFamily,
+    fontWeight = FontWeight.Bold,
+    fontSize = 24.sp,
+    lineHeight = 32.sp
+  ),
+  titleLarge = TextStyle(
+    fontFamily = CairoFontFamily,
+    fontWeight = FontWeight.Bold,
+    fontSize = 20.sp,
+    lineHeight = 28.sp
+  ),
+  titleMedium = TextStyle(
+    fontFamily = CairoFontFamily,
+    fontWeight = FontWeight.Medium,
+    fontSize = 16.sp,
+    lineHeight = 24.sp
+  ),
+  bodyLarge = TextStyle(
+    fontFamily = IbmArabicFontFamily,
+    fontWeight = FontWeight.Normal,
+    fontSize = 16.sp,
+    lineHeight = 24.sp
+  ),
+  bodyMedium = TextStyle(
+    fontFamily = IbmArabicFontFamily,
+    fontWeight = FontWeight.Normal,
+    fontSize = 14.sp,
+    lineHeight = 20.sp
+  ),
+  labelLarge = TextStyle(
+    fontFamily = CairoFontFamily,
+    fontWeight = FontWeight.Bold,
+    fontSize = 14.sp,
+    lineHeight = 20.sp
+  ),
+  labelSmall = TextStyle(
+    fontFamily = IbmArabicFontFamily,
+    fontWeight = FontWeight.Medium,
+    fontSize = 11.sp,
+    lineHeight = 16.sp
+  )
+)

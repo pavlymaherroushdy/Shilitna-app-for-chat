@@ -1,0 +1,235 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: deny everything by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Verified platform admin from user's configured email (guards email_verified == true)
+    function isPlatformAdmin() {
+      return isSignedIn() &&
+             ('email_verified' in request.auth.token) &&
+             request.auth.token.email_verified == true &&
+             ('email' in request.auth.token) &&
+             request.auth.token.email == 'pavlymaherroushdy@gmail.com';
+    }
+
+    function isValidMemberList(list) {
+      return list is list &&
+             list.size() >= 1 &&
+             list.size() <= 50 &&
+             list[0] is string;
+    }
+
+    function isValidRoom(data) {
+      return data.name is string && data.name.size() >= 1 && data.name.size() <= 60 &&
+             data.adminUid is string && data.adminUid.size() >= 1 && data.adminUid.size() <= 128 &&
+             data.adminName is string && data.adminName.size() >= 1 && data.adminName.size() <= 60 &&
+             data.pin is string && data.pin.size() >= 4 && data.pin.size() <= 12 &&
+             isValidMemberList(data.memberUids) &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp;
+    }
+
+    function isValidMember(data) {
+      return data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
+             data.role in ['admin', 'member'] &&
+             data.online is bool &&
+             data.adminUid is string && data.adminUid.size() >= 1 && data.adminUid.size() <= 128 &&
+             isValidMemberList(data.memberUids) &&
+             data.lastSeen is timestamp &&
+             data.joinedAt is timestamp;
+    }
+
+    function isValidMessage(data) {
+      return data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 60 &&
+             data.text is string && data.text.size() <= 2000 &&
+             data.mediaType in ['text', 'image', 'video'] &&
+             (!('mediaBase64' in data) || (data.mediaBase64 is string && data.mediaBase64.size() <= 350000)) &&
+             (!('mediaName' in data) || (data.mediaName is string && data.mediaName.size() <= 120)) &&
+             (!('mediaDurationMs' in data) || (data.mediaDurationMs is int && data.mediaDurationMs >= 0 && data.mediaDurationMs <= 36000000)) &&
+             (!('localMediaUri' in data) || (data.localMediaUri is string && data.localMediaUri.size() <= 500)) &&
+             data.adminUid is string && data.adminUid.size() >= 1 && data.adminUid.size() <= 128 &&
+             isValidMemberList(data.memberUids) &&
+             data.createdAt is timestamp;
+    }
+
+    match /rooms/{roomId} {
+      // Single-document get is allowed for signed-in users so invited friends can open an invite link
+      allow get: if isSignedIn() && isValidId(roomId);
+
+      // List queries must filter by memberUids or adminUid (enforced on resource.data)
+      allow list: if isSignedIn() && (
+        request.auth.uid in resource.data.memberUids ||
+        resource.data.adminUid == request.auth.uid ||
+        isPlatformAdmin()
+      );
+
+      allow create: if isSignedIn() &&
+                       isValidId(roomId) &&
+                       incoming().keys().hasAll(['name', 'adminUid', 'adminName', 'pin', 'memberUids', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['name', 'adminUid', 'adminName', 'pin', 'memberUids', 'createdAt', 'updatedAt']) &&
+                       isValidRoom(incoming()) &&
+                       incoming().adminUid == request.auth.uid &&
+                       request.auth.uid in incoming().memberUids &&
+                       incoming().memberUids.size() == 1 &&
+                       incoming().createdAt <= request.time &&
+                       incoming().updatedAt <= request.time;
+
+      allow update: if isSignedIn() &&
+                       isValidId(roomId) &&
+                       isValidRoom(incoming()) &&
+                       incoming().adminUid == existing().adminUid &&
+                       incoming().adminName == existing().adminName &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().updatedAt <= request.time &&
+                       (
+                         // Tier 1: Room Admin or Platform Admin can update name, pin, memberUids
+                         ((existing().adminUid == request.auth.uid || isPlatformAdmin()) &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'pin', 'memberUids', 'updatedAt'])) ||
+                         // Tier 2: Invited friend joining can only append their own UID to memberUids
+                         (incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt']) &&
+                          incoming().memberUids.hasAll(existing().memberUids) &&
+                          incoming().memberUids.size() <= existing().memberUids.size() + 1 &&
+                          request.auth.uid in incoming().memberUids)
+                       );
+
+      allow delete: if isSignedIn() &&
+                       isValidId(roomId) &&
+                       (existing().adminUid == request.auth.uid || isPlatformAdmin());
+
+      match /members/{memberId} {
+        allow get: if isSignedIn() &&
+                      isValidId(roomId) &&
+                      isValidId(memberId) &&
+                      (request.auth.uid == memberId ||
+                       request.auth.uid in existing().memberUids ||
+                       existing().adminUid == request.auth.uid ||
+                       isPlatformAdmin());
+
+        allow list: if isSignedIn() && (
+          request.auth.uid in resource.data.memberUids ||
+          resource.data.adminUid == request.auth.uid ||
+          isPlatformAdmin()
+        );
+
+        allow create: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(memberId) &&
+                         request.auth.uid == memberId &&
+                         incoming().keys().hasAll(['uid', 'displayName', 'role', 'online', 'adminUid', 'memberUids', 'lastSeen', 'joinedAt']) &&
+                         incoming().keys().hasOnly(['uid', 'displayName', 'role', 'online', 'adminUid', 'memberUids', 'lastSeen', 'joinedAt']) &&
+                         isValidMember(incoming()) &&
+                         incoming().uid == memberId &&
+                         incoming().lastSeen <= request.time &&
+                         incoming().joinedAt <= request.time &&
+                         existsAfter(/databases/$(database)/documents/rooms/$(roomId)) &&
+                         incoming().adminUid == getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.adminUid &&
+                         request.auth.uid in getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.memberUids &&
+                         (incoming().role == 'member' ||
+                          (incoming().role == 'admin' &&
+                           (incoming().adminUid == request.auth.uid || isPlatformAdmin())));
+
+        allow update: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(memberId) &&
+                         isValidMember(incoming()) &&
+                         incoming().uid == existing().uid &&
+                         incoming().adminUid == existing().adminUid &&
+                         incoming().role == existing().role &&
+                         incoming().joinedAt == existing().joinedAt &&
+                         incoming().lastSeen <= request.time &&
+                         (
+                           // Self presence/name update
+                           (request.auth.uid == memberId &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'online', 'lastSeen', 'memberUids'])) ||
+                           // New member joining atomically syncs memberUids on existing members
+                           (request.auth.uid in getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.memberUids &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['memberUids']) &&
+                            incoming().memberUids.hasAll(existing().memberUids)) ||
+                           // Room Admin or Platform Admin override
+                           ((existing().adminUid == request.auth.uid || isPlatformAdmin()) &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'online', 'lastSeen', 'memberUids']))
+                         );
+
+        allow delete: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(memberId) &&
+                         (request.auth.uid == memberId ||
+                          existing().adminUid == request.auth.uid ||
+                          isPlatformAdmin());
+      }
+
+      match /messages/{messageId} {
+        allow get: if isSignedIn() &&
+                      isValidId(roomId) &&
+                      isValidId(messageId) &&
+                      (request.auth.uid in existing().memberUids ||
+                       existing().adminUid == request.auth.uid ||
+                       isPlatformAdmin());
+
+        allow list: if isSignedIn() && (
+          request.auth.uid in resource.data.memberUids ||
+          resource.data.adminUid == request.auth.uid ||
+          isPlatformAdmin()
+        );
+
+        allow create: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(messageId) &&
+                         incoming().keys().hasAll(['senderId', 'senderName', 'text', 'mediaType', 'adminUid', 'memberUids', 'createdAt']) &&
+                         incoming().keys().hasOnly(['senderId', 'senderName', 'text', 'mediaType', 'mediaBase64', 'mediaName', 'mediaDurationMs', 'localMediaUri', 'adminUid', 'memberUids', 'createdAt']) &&
+                         isValidMessage(incoming()) &&
+                         incoming().senderId == request.auth.uid &&
+                         incoming().createdAt <= request.time &&
+                         (incoming().text.size() > 0 || incoming().mediaType != 'text') &&
+                         exists(/databases/$(database)/documents/rooms/$(roomId)) &&
+                         incoming().adminUid == get(/databases/$(database)/documents/rooms/$(roomId)).data.adminUid &&
+                         (request.auth.uid in get(/databases/$(database)/documents/rooms/$(roomId)).data.memberUids ||
+                          isPlatformAdmin());
+
+        allow update: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(messageId) &&
+                         isValidMessage(incoming()) &&
+                         incoming().senderId == existing().senderId &&
+                         incoming().adminUid == existing().adminUid &&
+                         incoming().createdAt == existing().createdAt &&
+                         (
+                           (request.auth.uid in getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.memberUids &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['memberUids']) &&
+                            incoming().memberUids.hasAll(existing().memberUids)) ||
+                           ((existing().adminUid == request.auth.uid || isPlatformAdmin()) &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['memberUids']))
+                         );
+
+        allow delete: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(messageId) &&
+                         (existing().senderId == request.auth.uid ||
+                          existing().adminUid == request.auth.uid ||
+                          isPlatformAdmin());
+      }
+    }
+  }
+}
