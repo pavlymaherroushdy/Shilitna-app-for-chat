@@ -39,6 +39,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.auth.attemptAutoSignIn
 import com.example.auth.authStateFlow
+import com.example.auth.getFirebaseAuthOrNull
 import com.example.data.ChatRepository
 import com.example.data.model.RoomAccessState
 import com.example.ui.ChatViewModel
@@ -48,9 +49,7 @@ import com.example.ui.screens.FirstTimeInvitePinScreen
 import com.example.ui.screens.LobbyScreen
 import com.example.ui.screens.PinLockScreen
 import com.example.ui.theme.ShillaChatTheme
-import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
 
 class MainActivity : ComponentActivity() {
@@ -91,14 +90,27 @@ class MainActivity : ComponentActivity() {
 fun AppNavigation(
   pendingInviteLink: String?,
   onInviteConsumed: () -> Unit,
-  auth: FirebaseAuth = Firebase.auth
+  injectedAuth: FirebaseAuth? = null
 ) {
   val context = LocalContext.current
+  val auth = remember(context, injectedAuth) {
+    injectedAuth ?: getFirebaseAuthOrNull(context)
+  }
+
+  if (auth == null) {
+    AuthScreen(
+      pendingInviteRoomId = pendingInviteLink,
+      isFirebaseConfigured = false,
+      onAuthSuccess = {}
+    )
+    return
+  }
+
   val currentUser by auth.authStateFlow().collectAsStateWithLifecycle(initialValue = auth.currentUser)
 
-  LaunchedEffect(Unit) {
+  LaunchedEffect(auth) {
     if (auth.currentUser == null) {
-      val credentialManager = CredentialManager.create(context)
+      val credentialManager = runCatching { CredentialManager.create(context) }.getOrNull()
       attemptAutoSignIn(
         context = context,
         credentialManager = credentialManager,
@@ -113,6 +125,7 @@ fun AppNavigation(
   if (user == null) {
     AuthScreen(
       pendingInviteRoomId = pendingInviteLink,
+      isFirebaseConfigured = true,
       onAuthSuccess = {}
     )
   } else {

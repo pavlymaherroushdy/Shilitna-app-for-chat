@@ -60,11 +60,14 @@ import com.example.auth.onGoogleSignInClicked
 @Composable
 fun AuthScreen(
   pendingInviteRoomId: String?,
+  isFirebaseConfigured: Boolean = true,
   onAuthSuccess: () -> Unit
 ) {
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
-  val credentialManager = remember(context) { CredentialManager.create(context) }
+  val credentialManager = remember(context) {
+    runCatching { CredentialManager.create(context) }.getOrNull()
+  }
   var isLoading by remember { mutableStateOf(false) }
   var errorMessage by remember { mutableStateOf<String?>(null) }
 
@@ -134,6 +137,25 @@ fun AuthScreen(
               text = "مساحة دردشة خاصة وسريعة لشلتك",
               style = MaterialTheme.typography.bodyMedium,
               color = MaterialTheme.colorScheme.onSurface
+            )
+          }
+        }
+
+        if (!isFirebaseConfigured) {
+          Card(
+            colors = CardDefaults.cardColors(
+              containerColor = MaterialTheme.colorScheme.errorContainer
+            ),
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier
+              .fillMaxWidth()
+              .testTag("missing_firebase_config_banner")
+          ) {
+            Text(
+              text = "تم بناء هذه النسخة بدون ملف google-services.json، لذا تم تعطيل الاتصال السحابي مؤقتاً لمنع توقف التطبيق. أضف GOOGLE_SERVICES_JSON إلى GitHub Secrets ثم أعد بناء الـ APK.",
+              style = MaterialTheme.typography.bodyMedium,
+              color = MaterialTheme.colorScheme.onErrorContainer,
+              modifier = Modifier.padding(16.dp)
             )
           }
         }
@@ -216,7 +238,7 @@ fun AuthScreen(
               }
             )
           },
-          enabled = !isLoading,
+          enabled = !isLoading && isFirebaseConfigured,
           shape = RoundedCornerShape(18.dp),
           colors = ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.primary,

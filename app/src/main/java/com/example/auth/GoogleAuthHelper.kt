@@ -14,6 +14,7 @@ import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.Companion.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
 import com.google.firebase.Firebase
+import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
@@ -27,6 +28,28 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
+fun isFirebaseReady(context: Context): Boolean {
+  return try {
+    FirebaseApp.getApps(context).isNotEmpty() || FirebaseApp.initializeApp(context) != null
+  } catch (e: Exception) {
+    Log.w("Auth", "FirebaseApp not initialized: ${e.message}")
+    false
+  }
+}
+
+fun getFirebaseAuthOrNull(context: Context): FirebaseAuth? {
+  return if (isFirebaseReady(context)) {
+    try {
+      Firebase.auth
+    } catch (e: Exception) {
+      Log.w("Auth", "Unable to acquire FirebaseAuth: ${e.message}")
+      null
+    }
+  } else {
+    null
+  }
+}
+
 fun FirebaseAuth.authStateFlow(): Flow<FirebaseUser?> = callbackFlow {
   val listener = FirebaseAuth.AuthStateListener { auth ->
     trySend(auth.currentUser)
@@ -37,12 +60,17 @@ fun FirebaseAuth.authStateFlow(): Flow<FirebaseUser?> = callbackFlow {
 
 fun attemptAutoSignIn(
   context: Context,
-  credentialManager: CredentialManager,
+  credentialManager: CredentialManager?,
   onAuthSuccess: () -> Unit,
   onUnauthenticated: () -> Unit,
   scope: CoroutineScope
 ) {
-  if (Firebase.auth.currentUser != null) {
+  val auth = getFirebaseAuthOrNull(context)
+  if (auth == null || credentialManager == null) {
+    onUnauthenticated()
+    return
+  }
+  if (auth.currentUser != null) {
     onAuthSuccess()
     return
   }
@@ -68,7 +96,7 @@ fun attemptAutoSignIn(
       val cred = credentialManager.getCredential(context, request).credential
       if (cred is CustomCredential && cred.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
         val token = GoogleIdTokenCredential.createFrom(cred.data).idToken
-        Firebase.auth.signInWithCredential(GoogleAuthProvider.getCredential(token, null)).await()
+        auth.signInWithCredential(GoogleAuthProvider.getCredential(token, null)).await()
         onAuthSuccess()
       } else {
         onUnauthenticated()
@@ -81,12 +109,21 @@ fun attemptAutoSignIn(
 
 fun onGoogleSignInClicked(
   context: Context,
-  credentialManager: CredentialManager,
+  credentialManager: CredentialManager?,
   onAuthSuccess: () -> Unit,
   onAuthError: (String) -> Unit,
   scope: CoroutineScope,
   onAuthCancelled: () -> Unit = {}
 ) {
+  val auth = getFirebaseAuthOrNull(context)
+  if (auth == null) {
+    onAuthError("Firebase غير مهيأ في هذه النسخة: أضف google-services.json لتفعيل تسجيل الدخول")
+    return
+  }
+  if (credentialManager == null) {
+    onAuthError("خدمة تسجيل الدخول عبر Google غير متاحة على هذا الجهاز")
+    return
+  }
   val clientId = try {
     context.getString(R.string.default_web_client_id)
   } catch (_: Exception) {
@@ -106,7 +143,7 @@ fun onGoogleSignInClicked(
       val cred = credentialManager.getCredential(activityContext, request).credential
       if (cred is CustomCredential && cred.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
         val token = GoogleIdTokenCredential.createFrom(cred.data).idToken
-        Firebase.auth.signInWithCredential(GoogleAuthProvider.getCredential(token, null)).await()
+        auth.signInWithCredential(GoogleAuthProvider.getCredential(token, null)).await()
         onAuthSuccess()
       } else {
         onAuthError("نوع بيانات الاعتماد غير متوقع")
@@ -122,18 +159,21 @@ fun onGoogleSignInClicked(
 }
 
 fun signOut(
-  credentialManager: CredentialManager,
+  credentialManager: CredentialManager?,
   scope: CoroutineScope,
   onSignOutComplete: () -> Unit = {}
 ) {
   scope.launch {
     withContext(NonCancellable) {
       try {
-        credentialManager.clearCredentialState(ClearCredentialStateRequest())
+        credentialManager?.clearCredentialState(ClearCredentialStateRequest())
       } catch (e: Exception) {
         Log.w("Auth", "Failed to clear credential state: ${e.message}")
       } finally {
-        Firebase.auth.signOut()
+        try {
+          Firebase.auth.signOut()
+        } catch (_: Exception) {
+        }
         onSignOutComplete()
       }
     }
