@@ -103,6 +103,25 @@ jobs:
             json.dump(parsed, f, indent=2)
             f.write("\n")
 
+          clients = parsed.get("client") or []
+          matching_clients = [
+            c for c in clients
+            if (c.get("client_info") or {}).get("android_client_info", {}).get("package_name") == "com.aistudio.shillachat.qmkxrp"
+          ]
+          if not matching_clients:
+            print("::warning::app/google-services.json has no Android client for package com.aistudio.shillachat.qmkxrp; default_web_client_id will be empty.")
+          else:
+            has_web_client = any(
+              o.get("client_type") == 3
+              for c in matching_clients
+              for o in (
+                (c.get("oauth_client") or []) +
+                (((c.get("services") or {}).get("appinvite_service") or {}).get("other_platform_oauth_client") or [])
+              )
+            )
+            if not has_web_client:
+              print("::warning::app/google-services.json is missing a Web OAuth client (client_type=3). Enable Google Sign-In in Firebase Auth and re-download google-services.json so default_web_client_id is generated.")
+
           print("Successfully wrote and validated app/google-services.json from GOOGLE_SERVICES_JSON secret.")
           PY
 

@@ -3,6 +3,7 @@ package com.example.auth
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.util.Log
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
@@ -29,8 +30,9 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
 fun isFirebaseReady(context: Context): Boolean {
+  val appContext = context.applicationContext ?: context
   return try {
-    FirebaseApp.getApps(context).isNotEmpty() || FirebaseApp.initializeApp(context) != null
+    FirebaseApp.getApps(appContext).isNotEmpty() || FirebaseApp.initializeApp(appContext) != null
   } catch (e: Exception) {
     Log.w("Auth", "FirebaseApp not initialized: ${e.message}")
     false
@@ -52,13 +54,37 @@ fun getFirebaseAuthOrNull(context: Context): FirebaseAuth? {
 
 @SuppressLint("DiscouragedApi")
 internal fun resolveDefaultWebClientId(context: Context): String {
-  val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
-  if (resId == 0) return ""
-  return try {
-    context.getString(resId)
-  } catch (_: Exception) {
-    ""
+  val appContext = context.applicationContext ?: context
+
+  // 1) Try generated R.string.default_web_client_id via reflection so compilation stays safe
+  // even when google-services.json is absent or omits a Web OAuth client.
+  val reflectedId = runCatching {
+    Class.forName("com.example.R\$string")
+      .getField("default_web_client_id")
+      .getInt(null)
+  }.getOrDefault(0)
+  if (reflectedId != 0) {
+    val value = runCatching { context.getString(reflectedId) }.getOrNull()?.trim().orEmpty()
+    if (value.isNotEmpty()) return value
   }
+
+  // 2) Fallback to Resources.getIdentifier across candidate package names.
+  val candidatePackages = listOf(context.packageName, appContext.packageName, "com.example").distinct()
+  for (pkg in candidatePackages) {
+    val resId = context.resources.getIdentifier("default_web_client_id", "string", pkg)
+    if (resId != 0) {
+      val value = runCatching { context.getString(resId) }.getOrNull()?.trim().orEmpty()
+      if (value.isNotEmpty()) return value
+    }
+  }
+
+  return ""
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+  is Activity -> this
+  is ContextWrapper -> baseContext?.findActivity()
+  else -> null
 }
 
 fun FirebaseAuth.authStateFlow(): Flow<FirebaseUser?> = callbackFlow {
@@ -133,7 +159,10 @@ fun onGoogleSignInClicked(
   }
   val clientId = resolveDefaultWebClientId(context)
   if (clientId.isBlank()) {
-    onAuthError("إعدادات تسجيل الدخول غير مكتملة: أضف google-services.json إلى المشروع")
+    onAuthError(
+      "تعذر العثور على Web Client ID (default_web_client_id) داخل google-services.json. " +
+        "فعّل تسجيل الدخول عبر Google في Firebase Authentication ثم أعد تحميل google-services.json وتحديث GOOGLE_SERVICES_JSON."
+    )
     return
   }
   val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
@@ -142,7 +171,7 @@ fun onGoogleSignInClicked(
     .build()
   scope.launch {
     try {
-      val activityContext = context as? Activity ?: context
+      val activityContext = context.findActivity() ?: context
       val cred = credentialManager.getCredential(activityContext, request).credential
       if (cred is CustomCredential && cred.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
         val token = GoogleIdTokenCredential.createFrom(cred.data).idToken
