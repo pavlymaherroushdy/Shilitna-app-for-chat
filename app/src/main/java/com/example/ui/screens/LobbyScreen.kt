@@ -33,6 +33,7 @@ import androidx.compose.material.icons.rounded.GroupAdd
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -77,6 +78,7 @@ import com.example.R
 import com.example.auth.signOut
 import com.example.data.model.SquadRoom
 import com.example.data.model.UiState
+import com.example.games.MiniGamesHubScreen
 import com.example.ui.ChatViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -97,6 +99,7 @@ fun LobbyScreen(
   val snackbarHostState = remember { SnackbarHostState() }
   var showCreateDialog by remember { mutableStateOf(false) }
   var showJoinLinkDialog by remember { mutableStateOf(false) }
+  var showMiniGamesHub by remember { mutableStateOf(false) }
 
   LaunchedEffect(statusMessage) {
     val msg = statusMessage
@@ -104,6 +107,14 @@ fun LobbyScreen(
       snackbarHostState.showSnackbar(msg)
       viewModel.clearStatusMessage()
     }
+  }
+
+  if (showMiniGamesHub) {
+    MiniGamesHubScreen(
+      memberNames = listOf(viewModel.currentUserName),
+      onClose = { showMiniGamesHub = false }
+    )
+    return
   }
 
   Scaffold(
@@ -225,6 +236,27 @@ fun LobbyScreen(
                 text = stringResource(id = R.string.join_by_link),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.secondary
+              )
+            }
+
+            OutlinedButton(
+              onClick = { showMiniGamesHub = true },
+              shape = RoundedCornerShape(16.dp),
+              modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .testTag("lobby_mini_games_button")
+            ) {
+              Icon(
+                imageVector = Icons.Rounded.SportsEsports,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.tertiary
+              )
+              Spacer(modifier = Modifier.width(8.dp))
+              Text(
+                text = stringResource(id = R.string.mini_games),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.tertiary
               )
             }
           }

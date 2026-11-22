@@ -99,6 +99,7 @@ import com.example.data.model.ChatMessage
 import com.example.data.model.RoomMember
 import com.example.data.model.SquadRoom
 import com.example.data.model.UiState
+import com.example.games.MiniGamesHubScreen
 import com.example.ui.ChatViewModel
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -167,6 +168,15 @@ fun ChatScreen(
     if (messageCount > 0) {
       listState.animateScrollToItem(messageCount - 1)
     }
+  }
+
+  if (showMiniGamesSheet) {
+    val memberNames = (membersState as? UiState.Success)?.data?.map { it.displayName }.orEmpty()
+    MiniGamesHubScreen(
+      memberNames = memberNames,
+      onClose = { showMiniGamesSheet = false }
+    )
+    return
   }
 
   Scaffold(
@@ -623,37 +633,6 @@ fun ChatScreen(
     }
   }
 
-  // Mini Games Placeholder Menu (Phase 2 preview)
-  if (showMiniGamesSheet) {
-    AlertDialog(
-      onDismissRequest = { showMiniGamesSheet = false },
-      containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-      title = {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-          Icon(Icons.Rounded.SportsEsports, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary)
-          Text("قائمة الألعاب المصغرة", style = MaterialTheme.typography.titleLarge)
-        }
-      },
-      text = {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-          Text(
-            text = "سيتم إضافة الألعاب المصغرة التفاعلية في المرحلة القادمة (Phase 2) لتلعبها مباشرة مع أصدقائك داخل الشات!",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-          )
-          MiniGamePreviewItem("تحدي إكس أو (XO) المباشر", "قريباً في المرحلة القادمة")
-          MiniGamePreviewItem("مسابقة أسئلة الشلة", "قريباً في المرحلة القادمة")
-          MiniGamePreviewItem("تخمين الرسمة السريع", "قريباً في المرحلة القادمة")
-        }
-      },
-      confirmButton = {
-        TextButton(onClick = { showMiniGamesSheet = false }) {
-          Text("حسناً")
-        }
-      }
-    )
-  }
-
   val previewBase64 = fullscreenImageBase64
   if (previewBase64 != null) {
     val decoded = remember(previewBase64) { MediaProcessor.decodeBase64Image(previewBase64) }
@@ -670,31 +649,6 @@ fun ChatScreen(
             contentScale = ContentScale.Fit
           )
         }
-      }
-    }
-  }
-}
-
-@Composable
-private fun MiniGamePreviewItem(title: String, badge: String) {
-  Card(
-    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background),
-    shape = RoundedCornerShape(14.dp),
-    modifier = Modifier.fillMaxWidth()
-  ) {
-    Row(
-      modifier = Modifier.padding(12.dp).fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically
-    ) {
-      Text(title, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
-      Surface(color = MaterialTheme.colorScheme.tertiaryContainer, shape = RoundedCornerShape(8.dp)) {
-        Text(
-          text = badge,
-          style = MaterialTheme.typography.labelSmall,
-          color = MaterialTheme.colorScheme.tertiary,
-          modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-        )
       }
     }
   }
