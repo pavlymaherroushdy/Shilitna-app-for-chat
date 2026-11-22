@@ -30,7 +30,7 @@ jobs:
             if [ -f debug.keystore.base64 ]; then
               base64 -d debug.keystore.base64 > debug.keystore
             elif [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
-              printf '%s' "$DEBUG_KEYSTORE_BASE64" | base64 -d > debug.keystore
+              printf '%s' "$DEBUG_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > debug.keystore
             else
               keytool -genkeypair -v \
                 -keystore debug.keystore \
@@ -45,18 +45,66 @@ jobs:
           fi
           keytool -list -v -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android | grep -E "SHA1:|SHA256:" || true
 
-      - name: Restore google-services.json from secret if provided
+      - name: Write app/google-services.json from secret
         env:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
-          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
-            trimmed="$(printf '%s' "$GOOGLE_SERVICES_JSON" | sed -e 's/^[[:space:]]*//')"
-            if [[ "$trimmed" == \{* ]]; then
-              printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
-            else
-              printf '%s' "$GOOGLE_SERVICES_JSON" | base64 -d > app/google-services.json
-            fi
-          fi
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          import sys
+
+          raw = os.environ.get("GOOGLE_SERVICES_JSON", "")
+          target = os.path.join("app", "google-services.json")
+          os.makedirs("app", exist_ok=True)
+
+          cleaned = raw.lstrip("\ufeff").strip()
+          if not cleaned:
+            if os.path.exists(target):
+              print("GOOGLE_SERVICES_JSON secret is empty; using existing app/google-services.json.")
+            else:
+              print("::warning::GOOGLE_SERVICES_JSON secret is not set; building without Firebase config.")
+            sys.exit(0)
+
+          json_text = None
+          if cleaned.startswith("{"):
+            json_text = cleaned
+          else:
+            try:
+              compact = "".join(cleaned.split())
+              compact += "=" * (-len(compact) % 4)
+              try:
+                raw_bytes = base64.b64decode(compact, validate=True)
+              except Exception:
+                raw_bytes = base64.urlsafe_b64decode(compact)
+              decoded = raw_bytes.decode("utf-8").lstrip("\ufeff").strip()
+              if decoded.startswith("{"):
+                json_text = decoded
+            except Exception as exc:
+              print(f"::error::Failed to decode GOOGLE_SERVICES_JSON secret: {exc}")
+              sys.exit(1)
+
+          if not json_text:
+            print("::error::GOOGLE_SERVICES_JSON secret is neither valid JSON nor Base64-encoded JSON.")
+            sys.exit(1)
+
+          try:
+            parsed = json.loads(json_text)
+          except json.JSONDecodeError as exc:
+            print(f"::error::GOOGLE_SERVICES_JSON does not contain valid JSON: {exc}")
+            sys.exit(1)
+
+          if not isinstance(parsed, dict) or "project_info" not in parsed or "client" not in parsed:
+            print("::error::GOOGLE_SERVICES_JSON is missing required Firebase fields ('project_info' or 'client').")
+            sys.exit(1)
+
+          with open(target, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(parsed, f, indent=2)
+            f.write("\n")
+
+          print("Successfully wrote and validated app/google-services.json from GOOGLE_SERVICES_JSON secret.")
+          PY
 
       - name: Set up Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v4
