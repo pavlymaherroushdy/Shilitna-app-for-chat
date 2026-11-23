@@ -38,7 +38,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.auth.attemptAutoSignIn
-import com.example.auth.authStateFlow
 import com.example.auth.getFirebaseAuthOrNull
 import com.example.data.ChatRepository
 import com.example.data.model.RoomAccessState
@@ -106,7 +105,31 @@ fun AppNavigation(
     return
   }
 
-  val currentUser by auth.authStateFlow().collectAsStateWithLifecycle(initialValue = auth.currentUser)
+  var currentUser by remember(auth) { mutableStateOf(auth.currentUser) }
+
+  DisposableEffect(auth) {
+    val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+      currentUser = firebaseAuth.currentUser
+    }
+    auth.addAuthStateListener(listener)
+    currentUser = auth.currentUser
+    onDispose {
+      auth.removeAuthStateListener(listener)
+    }
+  }
+
+  val rootLifecycleOwner = LocalLifecycleOwner.current
+  DisposableEffect(rootLifecycleOwner, auth) {
+    val observer = LifecycleEventObserver { _, event ->
+      if (event == Lifecycle.Event.ON_RESUME) {
+        currentUser = auth.currentUser
+      }
+    }
+    rootLifecycleOwner.lifecycle.addObserver(observer)
+    onDispose {
+      rootLifecycleOwner.lifecycle.removeObserver(observer)
+    }
+  }
 
   LaunchedEffect(auth) {
     if (auth.currentUser == null) {
@@ -114,7 +137,7 @@ fun AppNavigation(
       attemptAutoSignIn(
         context = context,
         credentialManager = credentialManager,
-        onAuthSuccess = {},
+        onAuthSuccess = { currentUser = auth.currentUser },
         onUnauthenticated = {},
         scope = this
       )
@@ -126,7 +149,7 @@ fun AppNavigation(
     AuthScreen(
       pendingInviteRoomId = pendingInviteLink,
       isFirebaseConfigured = true,
-      onAuthSuccess = {}
+      onAuthSuccess = { currentUser = auth.currentUser }
     )
   } else {
     val uid = user.uid

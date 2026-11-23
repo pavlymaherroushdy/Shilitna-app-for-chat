@@ -37,7 +37,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,6 +53,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.credentials.CredentialManager
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import com.example.R
 import com.example.auth.onGoogleSignInClicked
 
@@ -64,7 +65,8 @@ fun AuthScreen(
   onAuthSuccess: () -> Unit
 ) {
   val context = LocalContext.current
-  val scope = rememberCoroutineScope()
+  val lifecycleOwner = LocalLifecycleOwner.current
+  val scope = lifecycleOwner.lifecycleScope
   val credentialManager = remember(context) {
     runCatching { CredentialManager.create(context) }.getOrNull()
   }
@@ -209,12 +211,23 @@ fun AuthScreen(
         }
 
         if (errorMessage != null) {
-          Text(
-            text = errorMessage ?: "",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.error,
-            textAlign = TextAlign.Center
-          )
+          Card(
+            colors = CardDefaults.cardColors(
+              containerColor = MaterialTheme.colorScheme.errorContainer
+            ),
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier
+              .fillMaxWidth()
+              .testTag("auth_error_banner")
+          ) {
+            Text(
+              text = errorMessage ?: "",
+              style = MaterialTheme.typography.bodyMedium,
+              color = MaterialTheme.colorScheme.onErrorContainer,
+              textAlign = TextAlign.Center,
+              modifier = Modifier.fillMaxWidth().padding(14.dp)
+            )
+          }
         }
 
         Button(
@@ -233,8 +246,9 @@ fun AuthScreen(
                 errorMessage = msg
               },
               scope = scope,
-              onAuthCancelled = {
+              onAuthCancelled = { notice ->
                 isLoading = false
+                errorMessage = notice
               }
             )
           },
