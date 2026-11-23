@@ -31,6 +31,7 @@ import com.google.firebase.auth.auth
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -38,6 +39,8 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+
+private var activeAutoSignInJob: Job? = null
 
 fun isFirebaseReady(context: Context): Boolean {
   val appContext = context.applicationContext ?: context
@@ -104,10 +107,36 @@ internal fun extractGoogleIdToken(credential: Credential): String? {
   }
 }
 
-internal fun formatSignInExceptionMessage(error: Throwable): String {
-  return when (error) {
+internal fun shouldFallbackToGoogleIdOption(error: Throwable): Boolean {
+  if (error is NoCredentialException) return true
+  if (error is GetCredentialException) {
+    val msg = error.errorMessage?.toString().orEmpty()
+    if (msg.contains("reauth", ignoreCase = true) || msg.contains("[16]")) {
+      return true
+    }
+  }
+  return false
+}
+
+internal fun formatSignInExceptionMessage(
+  error: Throwable,
+  packageName: String = "",
+  clientId: String = ""
+): String {
+  val exceptionName = error::class.java.simpleName.ifBlank { "Exception" }
+  val causeDetail = error.cause?.let { c ->
+    "${c::class.java.simpleName}: ${c.message ?: c.localizedMessage ?: "unknown"}"
+  }
+
+  val maskedClient = if (clientId.length > 20) {
+    "${clientId.take(16)}...${clientId.takeLast(12)}"
+  } else {
+    clientId.ifBlank { "missing" }
+  }
+
+  val headline = when (error) {
     is NoCredentialException -> {
-      "لم يتم العثور على حساب Google جاهز لتسجيل الدخول على هذا الجهاز. تأكد من تسجيل الدخول بحساب Google في إعدادات الجهاز."
+      "لم يتم العثور على حساب Google جاهز لتسجيل الدخول على هذا الجهاز. تأكد من تسجيل الدخول بحساب Google في إعدادات الهاتف."
     }
     is GetCredentialProviderConfigurationException -> {
       "خدمات Google Play أو Credential Manager غير مهيأة على هذا الجهاز."
@@ -115,13 +144,22 @@ internal fun formatSignInExceptionMessage(error: Throwable): String {
     is GetCredentialInterruptedException -> {
       "توقفت عملية تسجيل الدخول مؤقتاً. يرجى المحاولة مرة أخرى."
     }
+    is GetCredentialCancellationException -> {
+      val msg = error.errorMessage?.toString().orEmpty()
+      if (msg.contains("reauth", ignoreCase = true) || msg.contains("[16]")) {
+        "فشلت إعادة مصادقة حساب Google من خدمات Google Play ([16] Account reauth failed). " +
+          "تأكد من: 1) أن شاشة OAuth Consent Screen في Google Cloud مهيأة (ومضاف إليها بريدك كـ Test User إذا كانت Testing)، " +
+          "2) أن الحساب على الهاتف لا يطلب إعادة تسجيل الدخول في إعدادات Google، " +
+          "3) تطابق Web Client ID وبصمة SHA-1 في نفس مشروع Firebase."
+      } else {
+        "تم إلغاء نافذة تسجيل الدخول عبر Google أو تعذر إتمامها."
+      }
+    }
     is GetCredentialCustomException -> {
-      val detail = error.errorMessage?.toString()?.takeIf { it.isNotBlank() } ?: error.type
-      "تعذر إكمال المصادقة من Google: $detail"
+      "تعذر إكمال المصادقة من Google (${error.type})."
     }
     is GetCredentialException -> {
-      val detail = error.errorMessage?.toString()?.takeIf { it.isNotBlank() } ?: error.localizedMessage ?: error.type
-      "تعذر تسجيل الدخول عبر Google: $detail"
+      "تعذر تسجيل الدخول عبر Google (${error.type})."
     }
     is FirebaseNetworkException -> {
       "تعذر الاتصال بالإنترنت أثناء تسجيل الدخول إلى Firebase."
@@ -131,15 +169,33 @@ internal fun formatSignInExceptionMessage(error: Throwable): String {
         "ERROR_OPERATION_NOT_ALLOWED" ->
           "مزوّد تسجيل الدخول عبر Google غير مفعّل في Firebase Console (Authentication -> Sign-in method)."
         "ERROR_INVALID_CREDENTIAL", "ERROR_INVALID_CUSTOM_TOKEN" ->
-          "رمز Google غير صالح أو لا يطابق إعدادات Firebase (تأكد من default_web_client_id وبصمة SHA-1 في Firebase Console)."
+          "رمز Google غير صالح أو لا يطابق إعدادات Firebase (تأكد من default_web_client_id وبصمة SHA-1)."
         "ERROR_USER_DISABLED" ->
           "تم تعطيل هذا الحساب في Firebase."
         else ->
-          "خطأ مصادقة Firebase (${error.errorCode}): ${error.localizedMessage ?: "تعذر تسجيل الدخول"}"
+          "فشل مصادقة Firebase (${error.errorCode})."
       }
     }
-    else -> error.localizedMessage?.takeIf { it.isNotBlank() } ?: "تعذر تسجيل الدخول عبر Google"
+    else -> "تعذر تسجيل الدخول عبر Google."
   }
+
+  val rawMsg = when (error) {
+    is GetCredentialException -> error.errorMessage?.toString()?.takeIf { it.isNotBlank() } ?: error.localizedMessage
+    is FirebaseAuthException -> "${error.errorCode}: ${error.localizedMessage ?: error.message}"
+    else -> error.localizedMessage ?: error.message
+  }?.trim().orEmpty().ifBlank { "no error message" }
+
+  val credType = (error as? GetCredentialException)?.type
+  val techParts = buildList {
+    add("Exception=$exceptionName")
+    if (!credType.isNullOrBlank()) add("credType=$credType")
+    add("detail=$rawMsg")
+    if (!causeDetail.isNullOrBlank()) add("cause=$causeDetail")
+    if (packageName.isNotBlank()) add("pkg=$packageName")
+    if (clientId.isNotBlank()) add("webClient=$maskedClient")
+  }.joinToString(" | ")
+
+  return "$headline\n[$techParts]"
 }
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {
@@ -185,7 +241,9 @@ fun attemptAutoSignIn(
   val request = GetCredentialRequest.Builder()
     .addCredentialOption(googleIdOption)
     .build()
-  scope.launch {
+
+  activeAutoSignInJob?.cancel()
+  activeAutoSignInJob = scope.launch {
     try {
       val activityContext = context.findActivity() ?: context
       val cred = credentialManager.getCredential(activityContext, request).credential
@@ -208,6 +266,20 @@ fun attemptAutoSignIn(
   }
 }
 
+private suspend fun signInWithCredentialOption(
+  activityContext: Context,
+  credentialManager: CredentialManager,
+  request: GetCredentialRequest,
+  auth: FirebaseAuth
+): FirebaseUser {
+  val cred = credentialManager.getCredential(activityContext, request).credential
+  val token = extractGoogleIdToken(cred)
+    ?: throw IllegalStateException("Unexpected credential type: ${cred.type} (${cred::class.java.simpleName})")
+  val authResult = auth.signInWithCredential(GoogleAuthProvider.getCredential(token, null)).await()
+  return authResult.user ?: auth.currentUser
+    ?: throw IllegalStateException("Firebase signInWithCredential succeeded but currentUser is null")
+}
+
 fun onGoogleSignInClicked(
   context: Context,
   credentialManager: CredentialManager?,
@@ -216,6 +288,9 @@ fun onGoogleSignInClicked(
   scope: CoroutineScope,
   onAuthCancelled: (String) -> Unit = {}
 ) {
+  activeAutoSignInJob?.cancel()
+  activeAutoSignInJob = null
+
   val auth = getFirebaseAuthOrNull(context)
   if (auth == null) {
     onAuthError("Firebase غير مهيأ في هذه النسخة: أضف google-services.json لتفعيل تسجيل الدخول")
@@ -233,53 +308,65 @@ fun onGoogleSignInClicked(
     )
     return
   }
+
   val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
-  val request = GetCredentialRequest.Builder()
+  val primaryRequest = GetCredentialRequest.Builder()
     .addCredentialOption(signInOption)
     .build()
-  scope.launch {
-    try {
-      val activityContext = context.findActivity() ?: context
-      val cred = credentialManager.getCredential(activityContext, request).credential
-      val token = extractGoogleIdToken(cred)
-      if (token == null) {
-        Log.w("Auth", "Unexpected credential type returned: ${cred.type} (${cred::class.java.simpleName})")
-        withContext(Dispatchers.Main.immediate) {
-          onAuthError("نوع بيانات الاعتماد المستلمة من Google غير متوقع (${cred.type})")
-        }
-        return@launch
-      }
 
-      val authResult = auth.signInWithCredential(GoogleAuthProvider.getCredential(token, null)).await()
-      val signedInUser = authResult.user ?: auth.currentUser
-      if (signedInUser != null) {
-        withContext(Dispatchers.Main.immediate) {
-          onAuthSuccess()
-        }
-      } else {
-        Log.e("Auth", "signInWithCredential completed but currentUser is null")
-        withContext(Dispatchers.Main.immediate) {
-          onAuthError("تعذر تأكيد جلسة المستخدم بعد اختيار الحساب. حاول مرة أخرى.")
-        }
-      }
+  scope.launch {
+    val activityContext = context.findActivity() ?: context
+    try {
+      signInWithCredentialOption(activityContext, credentialManager, primaryRequest, auth)
+      withContext(Dispatchers.Main.immediate) { onAuthSuccess() }
     } catch (e: CancellationException) {
       throw e
-    } catch (e: GetCredentialCancellationException) {
-      val reason = e.errorMessage?.toString()?.trim().orEmpty()
-      Log.w("Auth", "Google Sign-In flow cancelled or dismissed: $reason", e)
-      val userNotice = if (reason.isNotEmpty() && !reason.equals("activity is cancelled", ignoreCase = true)) {
-        "لم يكتمل تسجيل الدخول من Google ($reason). إذا اخترت حساباً وعادت الشاشة، تأكد من إضافة بصمة SHA-1 لتطبيقك في Firebase Console."
-      } else {
-        "تم إلغاء تسجيل الدخول أو رفضه بعد اختيار الحساب. إذا لم تقم بالإلغاء، فتأكد من تسجيل بصمة SHA-1 في Firebase Console وتفعيل Google Sign-In."
+    } catch (primaryError: Exception) {
+      Log.w(
+        "Auth",
+        "Primary GetSignInWithGoogleOption failed (${primaryError::class.java.simpleName}): ${primaryError.message}",
+        primaryError
+      )
+
+      if (shouldFallbackToGoogleIdOption(primaryError)) {
+        runCatching { credentialManager.clearCredentialState(ClearCredentialStateRequest()) }
+        val fallbackOption = GetGoogleIdOption.Builder()
+          .setFilterByAuthorizedAccounts(false)
+          .setServerClientId(clientId)
+          .setAutoSelectEnabled(false)
+          .build()
+        val fallbackRequest = GetCredentialRequest.Builder()
+          .addCredentialOption(fallbackOption)
+          .build()
+        try {
+          signInWithCredentialOption(activityContext, credentialManager, fallbackRequest, auth)
+          withContext(Dispatchers.Main.immediate) { onAuthSuccess() }
+          return@launch
+        } catch (e: CancellationException) {
+          throw e
+        } catch (fallbackError: Exception) {
+          Log.e(
+            "Auth",
+            "Fallback GetGoogleIdOption also failed (${fallbackError::class.java.simpleName}): ${fallbackError.message}",
+            fallbackError
+          )
+          val primaryDetail = formatSignInExceptionMessage(primaryError, context.packageName, clientId)
+          val fallbackSummary = "${fallbackError::class.java.simpleName}: ${(fallbackError as? GetCredentialException)?.errorMessage ?: fallbackError.message ?: "unknown"}"
+          val combined = "$primaryDetail\n[Fallback: $fallbackSummary]"
+          withContext(Dispatchers.Main.immediate) {
+            onAuthError(combined)
+          }
+          return@launch
+        }
       }
+
+      val formatted = formatSignInExceptionMessage(primaryError, context.packageName, clientId)
       withContext(Dispatchers.Main.immediate) {
-        onAuthCancelled(userNotice)
-      }
-    } catch (e: Exception) {
-      Log.e("Auth", "Google Sign-In failed", e)
-      val message = formatSignInExceptionMessage(e)
-      withContext(Dispatchers.Main.immediate) {
-        onAuthError(message)
+        if (primaryError is GetCredentialCancellationException) {
+          onAuthCancelled(formatted)
+        } else {
+          onAuthError(formatted)
+        }
       }
     }
   }
@@ -290,6 +377,8 @@ fun signOut(
   scope: CoroutineScope,
   onSignOutComplete: () -> Unit = {}
 ) {
+  activeAutoSignInJob?.cancel()
+  activeAutoSignInJob = null
   scope.launch {
     withContext(NonCancellable) {
       try {
