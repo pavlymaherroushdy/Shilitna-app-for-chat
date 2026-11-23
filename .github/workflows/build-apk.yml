@@ -43,7 +43,20 @@ jobs:
                 -dname "CN=Android Debug,O=Android,C=US"
             fi
           fi
-          keytool -list -v -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android | grep -E "SHA1:|SHA256:" || true
+
+      - name: Print SHA-1 fingerprint for Firebase
+        run: |
+          echo "=== Debug Keystore Fingerprints (copy SHA-1 to Firebase Console) ==="
+          FINGERPRINTS="$(keytool -list -v -keystore debug.keystore -storepass android -keypass android | grep -E "Alias name:|SHA1:|SHA256:" | sed 's/^[[:space:]]*//')"
+          echo "$FINGERPRINTS"
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            {
+              echo "### Signing Keystore Fingerprints"
+              echo '```text'
+              echo "$FINGERPRINTS"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Write app/google-services.json from secret
         env:
